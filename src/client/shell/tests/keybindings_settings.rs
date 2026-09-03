@@ -1,6 +1,26 @@
 use super::*;
 
 #[test]
+#[cfg(target_os = "linux")]
+fn fork_actionable_notifications_use_existing_pane_focus_endpoint() {
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_endpoint_methods(Some(vec!["pane.focus".into()]));
+
+    let outcome = state.focus_notification_target("p_workspace_42".into());
+
+    let [ClientShellAction::Endpoint { request, .. }] = &outcome.actions[..] else {
+        panic!("expected pane.focus endpoint action");
+    };
+    assert_eq!(
+        request.method,
+        crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget {
+            pane_id: "p_workspace_42".into(),
+        })
+    );
+}
+
+#[test]
 fn shell_new_controls_use_the_same_client_action_routes_as_keybinds() {
     let mut config = Config::default();
     config.ui.prompt_new_workspace_name = false;

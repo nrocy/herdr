@@ -9,6 +9,7 @@ use super::shell;
 pub(super) fn handle_shell_notification_effects(
     effects: Vec<shell::ClientShellNotificationEffect>,
     sound_config: &crate::config::SoundConfig,
+    event_tx: &tokio::sync::mpsc::Sender<super::ClientLoopEvent>,
 ) {
     for effect in effects {
         match effect {
@@ -24,14 +25,43 @@ pub(super) fn handle_shell_notification_effects(
                     warn!(err = %err, "failed to emit terminal notification");
                 }
             }
-            shell::ClientShellNotificationEffect::System { title, body } => {
-                if let Err(err) =
-                    crate::platform::show_desktop_notification(&title, body.as_deref())
-                {
-                    warn!(err = %err, "failed to emit system notification");
-                }
+            shell::ClientShellNotificationEffect::System {
+                title,
+                body,
+                pane_id,
+            } => {
+                handle_system_notification(&title, body.as_deref(), pane_id, event_tx.clone());
             }
         }
+    }
+}
+
+fn handle_system_notification(
+    title: &str,
+    body: Option<&str>,
+    pane_id: Option<String>,
+    event_tx: tokio::sync::mpsc::Sender<super::ClientLoopEvent>,
+) {
+    #[cfg(target_os = "linux")]
+    if let Some(pane_id) = pane_id {
+        let result =
+            crate::platform::show_desktop_notification_with_open_action(title, body, move || {
+                let _ = event_tx.blocking_send(super::ClientLoopEvent::NotificationOpen(pane_id));
+                match crate::platform::focus_sway_wezterm_window() {
+                    Ok(true) => debug!("focused Sway WezTerm window from desktop notification"),
+                    Ok(false) => warn!("Sway WezTerm focus prerequisites were not available"),
+                    Err(err) => warn!(err = %err, "failed to focus Sway WezTerm window"),
+                }
+            });
+        if let Err(err) = result {
+            warn!(err = %err, "failed to emit actionable system notification");
+        }
+        return;
+    }
+
+    let _ = (pane_id, event_tx);
+    if let Err(err) = crate::platform::show_desktop_notification(title, body) {
+        warn!(err = %err, "failed to emit system notification");
     }
 }
 

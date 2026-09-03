@@ -737,6 +737,7 @@ pub(crate) enum ClientShellNotificationEffect {
     System {
         title: String,
         body: Option<String>,
+        pane_id: Option<String>,
     },
 }
 

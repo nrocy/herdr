@@ -306,6 +306,9 @@ enum ClientLoopEvent {
     TerminalUnavailable(io::Error),
     /// Server message received.
     ServerMessage(Box<ServerMessage>),
+    /// The user activated a client-local desktop notification.
+    #[cfg(target_os = "linux")]
+    NotificationOpen(String),
     /// Server reader thread exited (connection lost).
     ServerDisconnected,
     /// Timer tick.
@@ -388,6 +391,15 @@ fn run_client_with_mode(
 
     crate::logging::startup("client");
     info!(path = %socket_path.display(), "{log_message}");
+
+    #[cfg(target_os = "linux")]
+    if client_rendered_shell {
+        match crate::platform::register_sway_wezterm_window() {
+            Ok(true) => info!("registered Sway WezTerm window for desktop notifications"),
+            Ok(false) => debug!("Sway WezTerm window registration was not available"),
+            Err(err) => warn!(err = %err, "failed to register Sway WezTerm window"),
+        }
+    }
 
     // Try to connect to the server.
     let mut stream = match crate::ipc::connect_local_stream(&socket_path) {
@@ -917,6 +929,23 @@ async fn run_client_loop(
         }
 
         match event {
+            #[cfg(target_os = "linux")]
+            ClientLoopEvent::NotificationOpen(pane_id) => {
+                let Some(shell) = state.shell.as_mut() else {
+                    continue;
+                };
+                let outcome = shell.focus_notification_target(pane_id);
+                if finish_client_shell_input(
+                    &mut state,
+                    outcome,
+                    None,
+                    &mut write_stream,
+                    &mut endpoint_commands,
+                    &mut prefix_input_source,
+                )? {
+                    return Ok(());
+                }
+            }
             #[cfg(unix)]
             ClientLoopEvent::StdinInput(data) => {
                 if state.shell.is_some() {
@@ -1494,7 +1523,7 @@ async fn run_client_loop(
                                 .flatten();
                             (effects, frame)
                         };
-                        handle_shell_notification_effects(effects, &state.sound_config);
+                        handle_shell_notification_effects(effects, &state.sound_config, &event_tx);
                         if let Some(frame) = frame {
                             state.present_frame(frame);
                         }
@@ -1789,7 +1818,7 @@ async fn run_client_loop(
                             .flatten();
                         (effects, outcome, frame)
                     };
-                    handle_shell_notification_effects(effects, &state.sound_config);
+                    handle_shell_notification_effects(effects, &state.sound_config, &event_tx);
                     if finish_client_shell_input(
                         &mut state,
                         outcome,

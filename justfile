@@ -232,3 +232,27 @@ release version:
 # Print default config
 default-config:
     cargo run --release --locked -- --default-config
+
+# Check the downstream notification contracts in the pinned Linux build container
+[unix]
+fork-check:
+    scripts/fork_static_linux.sh check
+
+# Rebase this clean downstream branch onto the canonical upstream master
+[unix]
+fork-rebase:
+    @if [ -n "$(git status --porcelain)" ]; then \
+        echo "error: working tree must be clean before rebasing"; \
+        exit 1; \
+    fi
+    git fetch https://github.com/herdrdev/herdr.git master
+    git rebase FETCH_HEAD
+
+# Build and distro-smoke-test the static x86_64 Linux binary
+[unix]
+fork-build-static-linux:
+    scripts/fork_static_linux.sh build
+
+# Rebase, check the fork contracts, and produce the daily binary
+[unix]
+fork-refresh: fork-rebase fork-check fork-build-static-linux

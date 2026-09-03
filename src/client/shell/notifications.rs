@@ -261,6 +261,16 @@ impl ClientShellState {
         }
     }
 
+    #[cfg(target_os = "linux")]
+    pub(crate) fn focus_notification_target(&mut self, pane_id: String) -> ClientShellInput {
+        let mut outcome = ClientShellInput::default();
+        self.push_endpoint_method(
+            crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget { pane_id }),
+            &mut outcome,
+        );
+        outcome
+    }
+
     pub(crate) fn receive_notification(
         &mut self,
         event: SemanticNotification,
@@ -369,6 +379,7 @@ impl ClientShellState {
                     effects.push(ClientShellNotificationEffect::System {
                         title: pending.event.title,
                         body: pending.event.body,
+                        pane_id: pending.event.pane_id,
                     });
                 }
                 crate::config::ToastDelivery::Terminal | crate::config::ToastDelivery::System => {}

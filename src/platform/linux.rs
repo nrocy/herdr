@@ -542,6 +542,105 @@ pub fn show_desktop_notification(title: &str, body: Option<&str>) -> std::io::Re
     show_desktop_notification_with_command(title, body, |program| Command::new(program))
 }
 
+/// Show an actionable desktop notification and invoke `on_open` for its default action.
+pub fn show_desktop_notification_with_open_action(
+    title: &str,
+    body: Option<&str>,
+    on_open: impl FnOnce() + Send + 'static,
+) -> std::io::Result<bool> {
+    if std::env::var_os("DISPLAY").is_none() && std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        return Ok(false);
+    }
+
+    let mut command = actionable_notification_command(title, body);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+
+    let child = match command.spawn() {
+        Ok(child) => child,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(err),
+    };
+    std::thread::spawn(move || {
+        if let Ok(output) = child.wait_with_output() {
+            if output.status.success() && output.stdout == b"default\n" {
+                on_open();
+            }
+        }
+    });
+    Ok(true)
+}
+
+fn actionable_notification_command(title: &str, body: Option<&str>) -> Command {
+    let mut command = Command::new("notify-send");
+    command
+        .arg("--expire-time=30000")
+        .arg("--action=default=Open")
+        .arg("--wait")
+        .arg("--")
+        .arg(title);
+    if let Some(body) = body.filter(|body| !body.is_empty()) {
+        command.arg(body);
+    }
+    command
+}
+
+fn sway_wezterm_pane_id() -> Option<String> {
+    if std::env::var_os("SWAYSOCK").is_none()
+        || !std::env::var("TERM_PROGRAM").is_ok_and(|program| program == "WezTerm")
+    {
+        return None;
+    }
+    std::env::var("WEZTERM_PANE")
+        .ok()
+        .filter(|pane_id| !pane_id.is_empty() && pane_id.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+fn sway_wezterm_mark(pane_id: &str) -> String {
+    format!("herdr-wezterm-pane-{pane_id}")
+}
+
+/// Mark the focused Sway container so notification actions can return to this exact client.
+pub fn register_sway_wezterm_window() -> std::io::Result<bool> {
+    let Some(pane_id) = sway_wezterm_pane_id() else {
+        return Ok(false);
+    };
+    run_notification_command(sway_wezterm_register_command(&pane_id))
+}
+
+/// Focus the WezTerm pane and Sway container hosting this client.
+pub fn focus_sway_wezterm_window() -> std::io::Result<bool> {
+    let Some(pane_id) = sway_wezterm_pane_id() else {
+        return Ok(false);
+    };
+
+    let wezterm_focused = run_notification_command(wezterm_activate_pane_command(&pane_id))?;
+    let sway_focused = run_notification_command(sway_wezterm_focus_command(&pane_id))?;
+    Ok(wezterm_focused && sway_focused)
+}
+
+fn sway_wezterm_register_command(pane_id: &str) -> Command {
+    let mark = sway_wezterm_mark(pane_id);
+    let mut command = Command::new("swaymsg");
+    command.args(["mark", "--replace", &mark]);
+    command
+}
+
+fn wezterm_activate_pane_command(pane_id: &str) -> Command {
+    let mut command = Command::new("wezterm");
+    command.args(["cli", "activate-pane", "--pane-id", pane_id]);
+    command
+}
+
+fn sway_wezterm_focus_command(pane_id: &str) -> Command {
+    let mark = sway_wezterm_mark(pane_id);
+    let mut command = Command::new("swaymsg");
+    command.arg(format!(r#"[con_mark="{mark}"] focus"#));
+    command
+}
+
 fn show_desktop_notification_with_command(
     title: &str,
     body: Option<&str>,
@@ -1550,6 +1649,56 @@ mod tests {
         let args = std::fs::read_to_string(&path).expect("args file");
         let _ = std::fs::remove_file(&path);
         assert_eq!(args, "--\n-danger\nbody\n");
+    }
+
+    #[test]
+    fn fork_actionable_notifications_build_targeted_linux_commands() {
+        let notification = actionable_notification_command("-workspace", Some("codex needs input"));
+        assert_eq!(notification.get_program(), "notify-send");
+        assert_eq!(
+            notification
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            vec![
+                "--expire-time=30000",
+                "--action=default=Open",
+                "--wait",
+                "--",
+                "-workspace",
+                "codex needs input",
+            ]
+        );
+
+        let register = sway_wezterm_register_command("42");
+        assert_eq!(register.get_program(), "swaymsg");
+        assert_eq!(
+            register
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            vec!["mark", "--replace", "herdr-wezterm-pane-42"]
+        );
+
+        let wezterm = wezterm_activate_pane_command("42");
+        assert_eq!(wezterm.get_program(), "wezterm");
+        assert_eq!(
+            wezterm
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            vec!["cli", "activate-pane", "--pane-id", "42"]
+        );
+
+        let focus = sway_wezterm_focus_command("42");
+        assert_eq!(focus.get_program(), "swaymsg");
+        assert_eq!(
+            focus
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            vec![r#"[con_mark="herdr-wezterm-pane-42"] focus"#]
+        );
     }
 
     #[test]
