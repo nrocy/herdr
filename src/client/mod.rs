@@ -931,6 +931,7 @@ async fn run_client_loop(
         match event {
             #[cfg(target_os = "linux")]
             ClientLoopEvent::NotificationOpen(pane_id) => {
+                info!(pane_id, "submitting pane.focus for desktop notification");
                 let Some(shell) = state.shell.as_mut() else {
                     continue;
                 };

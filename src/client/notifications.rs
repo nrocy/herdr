@@ -1,6 +1,6 @@
 use std::io;
 
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use crate::protocol::NotifyKind;
 
@@ -46,6 +46,7 @@ fn handle_system_notification(
     if let Some(pane_id) = pane_id {
         let result =
             crate::platform::show_desktop_notification_with_open_action(title, body, move || {
+                info!(pane_id, "desktop notification open action activated");
                 let _ = event_tx.blocking_send(super::ClientLoopEvent::NotificationOpen(pane_id));
                 match crate::platform::focus_sway_wezterm_window() {
                     Ok(true) => debug!("focused Sway WezTerm window from desktop notification"),

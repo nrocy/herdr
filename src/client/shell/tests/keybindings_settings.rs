@@ -4,7 +4,10 @@ use super::*;
 #[cfg(target_os = "linux")]
 fn fork_actionable_notifications_use_existing_pane_focus_endpoint() {
     let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
-    state.set_snapshot(Box::new(snapshot()));
+    let snapshot = snapshot();
+    let workspace_id = snapshot.workspaces[0].workspace_id.clone();
+    let workspace_label = snapshot.workspaces[0].label.clone();
+    state.set_snapshot(Box::new(snapshot));
     state.set_endpoint_methods(Some(vec!["pane.focus".into()]));
 
     let outcome = state.focus_notification_target("p_workspace_42".into());
@@ -18,6 +21,20 @@ fn fork_actionable_notifications_use_existing_pane_focus_endpoint() {
             pane_id: "p_workspace_42".into(),
         })
     );
+
+    let (title, body) = state.system_notification_copy(&SemanticNotification {
+        kind: SemanticNotificationKind::NeedsAttention,
+        title: "codex needs attention".into(),
+        body: Some("old context".into()),
+        sound: None,
+        agent: Some("codex".into()),
+        workspace_id: Some(workspace_id),
+        tab_id: None,
+        pane_id: Some("p_workspace_42".into()),
+        position: None,
+    });
+    assert_eq!(title, workspace_label);
+    assert_eq!(body.as_deref(), Some("codex needs input"));
 }
 
 #[test]

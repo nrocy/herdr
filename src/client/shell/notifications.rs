@@ -376,9 +376,10 @@ impl ClientShellState {
                     });
                 }
                 crate::config::ToastDelivery::System if !suppress_external => {
+                    let (title, body) = self.system_notification_copy(&pending.event);
                     effects.push(ClientShellNotificationEffect::System {
-                        title: pending.event.title,
-                        body: pending.event.body,
+                        title,
+                        body,
                         pane_id: pending.event.pane_id,
                     });
                 }
@@ -386,6 +387,30 @@ impl ClientShellState {
             }
         }
         (effects, repaint)
+    }
+
+    pub(super) fn system_notification_copy(
+        &self,
+        event: &SemanticNotification,
+    ) -> (String, Option<String>) {
+        let Some(workspace_id) = event.workspace_id.as_deref() else {
+            return (event.title.clone(), event.body.clone());
+        };
+        let Some(workspace_title) = self.snapshot.as_deref().and_then(|snapshot| {
+            snapshot
+                .workspaces
+                .iter()
+                .find(|workspace| workspace.workspace_id == workspace_id)
+                .map(|workspace| workspace.label.clone())
+        }) else {
+            return (event.title.clone(), event.body.clone());
+        };
+        let agent_state = event
+            .title
+            .strip_suffix(" needs attention")
+            .map(|agent| format!("{agent} needs input"))
+            .unwrap_or_else(|| event.title.clone());
+        (workspace_title, Some(agent_state))
     }
 
     fn notification_target_is_active(&self, event: &SemanticNotification) -> bool {

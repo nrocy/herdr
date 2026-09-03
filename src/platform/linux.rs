@@ -624,7 +624,7 @@ pub fn focus_sway_wezterm_window() -> std::io::Result<bool> {
 fn sway_wezterm_register_command(pane_id: &str) -> Command {
     let mark = sway_wezterm_mark(pane_id);
     let mut command = Command::new("swaymsg");
-    command.args(["mark", "--replace", &mark]);
+    command.args(["--", "mark", "--replace", &mark]);
     command
 }
 
@@ -1677,7 +1677,7 @@ mod tests {
                 .get_args()
                 .map(|arg| arg.to_string_lossy().into_owned())
                 .collect::<Vec<_>>(),
-            vec!["mark", "--replace", "herdr-wezterm-pane-42"]
+            vec!["--", "mark", "--replace", "herdr-wezterm-pane-42"]
         );
 
         let wezterm = wezterm_activate_pane_command("42");
